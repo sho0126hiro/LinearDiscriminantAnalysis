@@ -1,0 +1,2 @@
+# LinearDiscriminantAnalysis
+LinearDiscriminantAnalysis（線形判別分析）
