@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	DIM      = 2
-	DATASIZE = 3
+	DIM      = 196
+	DATASIZE = 200
 )
 
 func stringToFloat64(s []string) [DIM]float64 {
@@ -36,9 +36,9 @@ func readDataset() ([DATASIZE][DIM]float64, [DATASIZE][DIM]float64) {
 	var datasetA [DATASIZE][DIM]float64
 	var datasetB [DATASIZE][DIM]float64
 	for i := 0; i < DATASIZE; i++ {
-		path := fmt.Sprintf("./testdata/1/%03d.txt", i+1)
+		path := fmt.Sprintf("./data/1/%03d.txt", i+1)
 		datasetA[i] = readFile(path)
-		path = fmt.Sprintf("./testdata/2/%03d.txt", i+1)
+		path = fmt.Sprintf("./data/2/%03d.txt", i+1)
 		datasetB[i] = readFile(path)
 	}
 	return datasetA, datasetB
@@ -185,32 +185,6 @@ func (m Matrix) toSlice() [][]float64 {
 	return m.mat
 }
 
-// 行列の中の絶対値最大のインデックスを取得する
-// 行, 列
-func (m Matrix) getAbsMaxIndex() (int, int) {
-	tmp := 0.0
-	rowMaxIndex, colMaxIndex := 0, 0
-	for j := 0; j < m.row; j++ {
-		for i := j + 1; i < m.col; i++ {
-			if math.Abs(m.mat[j][i]) > tmp {
-				tmp = math.Abs(m.mat[j][i])
-				rowMaxIndex = j
-				colMaxIndex = i
-			}
-		}
-	}
-	return rowMaxIndex, colMaxIndex
-}
-
-// 回転角の取得
-func (m Matrix) getTheta(i, j int) float64 {
-	tmp := m.mat[j][j] - m.mat[i][i]
-	if tmp == 0 {
-		return math.Pi / 4.0
-	}
-	return 0.5 * math.Atan(2.0*m.mat[i][j]/tmp)
-}
-
 func (m Matrix) eigenMax1() (float64, *Matrix) {
 	// 最大固有値・最大固有ベクトルのみを求めて返す
 	const (
@@ -300,25 +274,59 @@ type LDA struct {
 	trainB   [][DIM]float64
 	testA    [][DIM]float64
 	testB    [][DIM]float64
-	eigenVec *Matrix
+	eigenVec *Matrix // データから求まった固有値最大の固有ベクトル
+
+	attributeA      []float64 // 次元削減後のデータ
+	attributeB      []float64 // 次元削減後のデータ
+	attributeMeanA  float64   // 固有ベクトルの方向へ射影した後のAの平均値
+	attributeMeanB  float64   // 固有ベクトルの方向へ射影した後のBの平均値
+	attributeSigmaA float64   // 固有ベクトルの方向へ射影した後のAの標準偏差
+	attributeSigmaB float64   // 固有ベクトルの方向へ射影した後のBの標準偏差
+
 }
 
 // constructor
 func NewLDA(datasetA [DATASIZE][DIM]float64, datasetB [DATASIZE][DIM]float64, experiment_mode int) *LDA {
 	lda := new(LDA)
-	// lda.testA = datasetA[0:20]
-	// lda.testB = datasetB[0:20]
-	// lda.trainA = datasetA[20:DATASIZE]
-	// lda.trainB = datasetB[20:DATASIZE]
-	lda.trainA = datasetA[:]
-	lda.trainB = datasetB[:]
+	if experiment_mode == 1 {
+		lda.testA = datasetA[0:20]
+		lda.testB = datasetB[0:20]
+		lda.trainA = datasetA[20:DATASIZE]
+		lda.trainB = datasetB[20:DATASIZE]
+	} else {
+		var testX, testY, trainX, trainY, trainX2, trainY2 int
+		switch experiment_mode {
+		case 2:
+			testX, testY = 20, 40
+			trainX, trainY = 0, 20
+			trainX2, trainY2 = 40, DATASIZE
+		case 3:
+			testX, testY = 40, 60
+			trainX, trainY = 0, 40
+			trainX2, trainY2 = 60, DATASIZE
+		case 4:
+			testX, testY = 60, 80
+			trainX, trainY = 0, 60
+			trainX2, trainY2 = 80, DATASIZE
+		case 5:
+			testX, testY = 80, 100
+			trainX, trainY = 0, 80
+			trainX2, trainY2 = 100, DATASIZE
+		}
+		lda.testA = datasetA[testX:testY]
+		lda.testB = datasetB[testX:testY]
+		lda.trainA = append(datasetA[trainX:trainY], datasetA[trainX2:trainY2]...)
+		lda.trainB = append(datasetB[trainX:trainY], datasetB[trainX2:trainY2]...)
+	}
+	// lda.trainA = datasetA[:]
+	// lda.trainB = datasetB[:]
 	return lda
 }
 
 /* 各カテゴリの平均・全データの平均を求める
  * @return aveA, aveB, AveAll
  */
-func (l LDA) average() (*Matrix, *Matrix, *Matrix) {
+func (l *LDA) average() (*Matrix, *Matrix, *Matrix) {
 	aveA := NewMatrixByVector(make([]float64, DIM))
 	aveB := NewMatrixByVector(make([]float64, DIM))
 	aveAll := NewMatrixByVector(make([]float64, DIM))
@@ -339,7 +347,7 @@ func (l LDA) average() (*Matrix, *Matrix, *Matrix) {
 }
 
 //　　カテゴリ間分散Sb・カテゴリ内分散Swの最大・最小化（のための）項を求める
-func (l LDA) variance() (*Matrix, *Matrix) {
+func (l *LDA) variance() (*Matrix, *Matrix) {
 	// クラス内分散最大化項
 	sw := NewZeroMatrix(DIM, DIM)
 	aveA, aveB, _ := l.average()
@@ -357,19 +365,138 @@ func (l LDA) variance() (*Matrix, *Matrix) {
 	return sb, sw
 }
 
-func (l LDA) train() {
+func (l *LDA) train() {
 	const MODE = 1
-	fmt.Printf("--- sb/sw ---\n")
+	// fmt.Printf("--- sb/sw ---\n")
 	sb, sw := l.variance()
-	fmt.Printf("--- eigenVec/val ---\n")
+	// fmt.Printf("--- eigenVec/val ---\n")
 	_, eigenvec := sw.inverse().product(sb).eigenMax1()
 	l.eigenVec = eigenvec
-	fmt.Println(l.eigenVec)
+	// fmt.Println(l.eigenVec)
+	// 射影
+	// fmt.Println(l.trainA)
+	l.attributeA = make([]float64, len(l.trainA))
+	l.attributeB = make([]float64, len(l.trainB))
+	for idx, tA := range l.trainA {
+		tA := NewMatrixByVector(tA[:])
+		l.attributeA[idx] = tA.T().product(l.eigenVec).mat[0][0]
+		tB := NewMatrixByVector(l.trainB[idx][:])
+		l.attributeB[idx] = tB.T().product(l.eigenVec).mat[0][0]
+	}
+
+	sumA := 0.0
+	sumB := 0.0
+
+	for idx, aA := range l.attributeA {
+		sumA += aA
+		sumB += l.attributeB[idx]
+	}
+	l.attributeMeanA = sumA / float64(len(l.trainA))
+	l.attributeMeanB = sumB / float64(len(l.trainB))
+
+	sigmaA := 0.0
+	sigmaB := 0.0
+
+	for idx, aA := range l.attributeA {
+		sigmaA += math.Pow(aA-l.attributeMeanA, 2)
+		sigmaB += math.Pow(l.attributeB[idx]-l.attributeMeanB, 2)
+	}
+	l.attributeSigmaA = math.Sqrt(sigmaA / float64(len(l.trainA)))
+	l.attributeSigmaB = math.Sqrt(sigmaB / float64(len(l.trainB)))
+}
+
+func (l *LDA) trainResult() {
+	// fmt.Println(l.attributeA)
+	// fmt.Println(l.attributeB)
+	fmt.Println(l.attributeMeanA)
+	fmt.Println(l.attributeMeanB)
+	fmt.Println(l.attributeSigmaA)
+	fmt.Println(l.attributeSigmaB)
+}
+
+// 予測 A --- 1, B -- -1
+func (l *LDA) predict(input [DIM]float64) int {
+	i := NewMatrixByVector(input[:])
+	x := i.T().product(l.eigenVec).mat[0][0]
+	dA := math.Abs(x-l.attributeMeanA) / l.attributeSigmaA
+	dB := math.Abs(x-l.attributeMeanB) / l.attributeSigmaB
+	if dA < dB {
+		return 1
+	}
+	return -1
+}
+
+func (l *LDA) test() (float64, float64) {
+	trueA := 0.0
+	trueB := 0.0
+	for idx, testA := range l.testA {
+		if l.predict(testA) == 1 {
+			trueA += 1.0
+		}
+		if l.predict(l.testB[idx]) == -1 {
+			trueB += 1.0
+		}
+	}
+	fmt.Println("[字種1] 認識率(%):", trueA/float64(len(l.testA))*100, "正解数/対象データ数:", strconv.Itoa(int(trueA))+"/"+strconv.Itoa(len(l.testA)))
+	fmt.Println("[字種2] 認識率(%):", trueB/float64(len(l.testB))*100, "正解数/対象データ数:", strconv.Itoa(int(trueB))+"/"+strconv.Itoa(len(l.testB)))
+	fmt.Println("[全体] 認識率(%):", (trueA+trueB)/float64(len(l.testB)*2)*100,
+		"正解数/対象データ数: ", strconv.Itoa(int(trueA+trueB))+"/"+strconv.Itoa(2*len(l.testA)))
+
+	return trueA, trueB
 }
 
 func main() {
-	const MODE = 1
 	datasetA, datasetB := readDataset()
-	lda := NewLDA(datasetA, datasetB, MODE)
-	lda.train()
+	mode := []int{1, 2, 3, 4, 5}
+	trueA := 0.0
+	trueB := 0.0
+	for _, md := range mode {
+		fmt.Println("実験番号:", md)
+		lda := NewLDA(datasetA, datasetB, md)
+		lda.train()
+		tA, tB := lda.test()
+		trueA += tA
+		trueB += tB
+		fmt.Println()
+	}
+	fmt.Println("---[実験全体の認識率]---")
+	fmt.Println("[字種1] 認識率(%): ", trueA, "正解数/対象データ数:", strconv.Itoa(int(trueA))+"/100")
+	fmt.Println("[字種2] 認識率(%): ", trueB, "正解数/対象データ数:", strconv.Itoa(int(trueB))+"/100")
+	fmt.Println("[合計] 認識率(%): ", ((trueA+trueB)/200.0)*100, "正解数/対象データ数:", strconv.Itoa(int(trueA+trueB))+"/200")
 }
+
+/**
+
+実験結果:
+
+実験番号: 1
+[字種1] 認識率(%): 95 正解数/対象データ数: 19/20
+[字種2] 認識率(%): 75 正解数/対象データ数: 15/20
+[全体] 認識率(%): 85 正解数/対象データ数:  34/40
+
+実験番号: 2
+[字種1] 認識率(%): 90 正解数/対象データ数: 18/20
+[字種2] 認識率(%): 100 正解数/対象データ数: 20/20
+[全体] 認識率(%): 95 正解数/対象データ数:  38/40
+
+実験番号: 3
+[字種1] 認識率(%): 100 正解数/対象データ数: 20/20
+[字種2] 認識率(%): 90 正解数/対象データ数: 18/20
+[全体] 認識率(%): 95 正解数/対象データ数:  38/40
+
+実験番号: 4
+[字種1] 認識率(%): 100 正解数/対象データ数: 20/20
+[字種2] 認識率(%): 100 正解数/対象データ数: 20/20
+[全体] 認識率(%): 100 正解数/対象データ数:  40/40
+
+実験番号: 5
+[字種1] 認識率(%): 90 正解数/対象データ数: 18/20
+[字種2] 認識率(%): 100 正解数/対象データ数: 20/20
+[全体] 認識率(%): 95 正解数/対象データ数:  38/40
+
+---[実験全体の認識率]---
+[字種1] 認識率(%):  95 正解数/対象データ数: 95/100
+[字種2] 認識率(%):  93 正解数/対象データ数: 93/100
+[合計] 認識率(%):  94 正解数/対象データ数: 188/200
+
+*/
