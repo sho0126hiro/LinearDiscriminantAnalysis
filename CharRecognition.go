@@ -10,8 +10,10 @@ import (
 )
 
 const (
-	DIM      = 196
-	DATASIZE = 200
+	DIM            = 196
+	DATASIZE       = 200
+	TRAIN_DATASIZE = 180
+	TEST_DATASIZE  = 20
 )
 
 func stringToFloat64(s []string) [DIM]float64 {
@@ -288,11 +290,16 @@ type LDA struct {
 // constructor
 func NewLDA(datasetA [DATASIZE][DIM]float64, datasetB [DATASIZE][DIM]float64, experiment_mode int) *LDA {
 	lda := new(LDA)
+	trainA := make([][DIM]float64, TRAIN_DATASIZE)
+	trainB := make([][DIM]float64, TRAIN_DATASIZE)
+	testA := make([][DIM]float64, TEST_DATASIZE)
+	testB := make([][DIM]float64, TEST_DATASIZE)
+
 	if experiment_mode == 1 {
-		lda.testA = datasetA[0:20]
-		lda.testB = datasetB[0:20]
-		lda.trainA = datasetA[20:DATASIZE]
-		lda.trainB = datasetB[20:DATASIZE]
+		_ = copy(testA, datasetA[0:20])
+		_ = copy(testB, datasetB[0:20])
+		_ = copy(trainA, datasetA[20:DATASIZE])
+		_ = copy(trainB, datasetB[20:DATASIZE])
 	} else {
 		var testX, testY, trainX, trainY, trainX2, trainY2 int
 		switch experiment_mode {
@@ -313,13 +320,16 @@ func NewLDA(datasetA [DATASIZE][DIM]float64, datasetB [DATASIZE][DIM]float64, ex
 			trainX, trainY = 0, 80
 			trainX2, trainY2 = 100, DATASIZE
 		}
-		lda.testA = datasetA[testX:testY]
-		lda.testB = datasetB[testX:testY]
-		lda.trainA = append(datasetA[trainX:trainY], datasetA[trainX2:trainY2]...)
-		lda.trainB = append(datasetB[trainX:trainY], datasetB[trainX2:trainY2]...)
+		// おそらくlda.test~にポインタごと入ってしまっているので，appendしたときにもとの配列のポインタ（形状）が変わってしまっている？
+		_ = copy(testA, datasetA[testX:testY])
+		_ = copy(testB, datasetB[testX:testY])
+		_ = copy(trainA, append(datasetA[trainX:trainY], datasetA[trainX2:trainY2]...))
+		_ = copy(trainB, append(datasetB[trainX:trainY], datasetB[trainX2:trainY2]...))
 	}
-	// lda.trainA = datasetA[:]
-	// lda.trainB = datasetB[:]
+	lda.trainA = trainA
+	lda.trainB = trainB
+	lda.testA = testA
+	lda.testB = testB
 	return lda
 }
 
@@ -339,8 +349,8 @@ func (l *LDA) average() (*Matrix, *Matrix, *Matrix) {
 		totalA = totalA.add(trainA)
 		totalB = totalB.add(trainB)
 	}
-	aveA = totalA.times(1 / float64(DATASIZE))
-	aveB = totalB.times(1 / float64(DATASIZE))
+	aveA = totalA.times(1 / float64(TRAIN_DATASIZE))
+	aveB = totalB.times(1 / float64(TRAIN_DATASIZE))
 	// 辞書全体の平均
 	aveAll = (aveA.add(aveB)).times(1.0 / 2.0)
 	return aveA, aveB, aveAll
@@ -471,32 +481,32 @@ func main() {
 
 実験番号: 1
 [字種1] 認識率(%): 95 正解数/対象データ数: 19/20
-[字種2] 認識率(%): 75 正解数/対象データ数: 15/20
-[全体] 認識率(%): 85 正解数/対象データ数:  34/40
+[字種2] 認識率(%): 80 正解数/対象データ数: 16/20
+[全体] 認識率(%): 87.5 正解数/対象データ数:  35/40
 
 実験番号: 2
-[字種1] 認識率(%): 90 正解数/対象データ数: 18/20
-[字種2] 認識率(%): 100 正解数/対象データ数: 20/20
-[全体] 認識率(%): 95 正解数/対象データ数:  38/40
+[字種1] 認識率(%): 70 正解数/対象データ数: 14/20
+[字種2] 認識率(%): 80 正解数/対象データ数: 16/20
+[全体] 認識率(%): 75 正解数/対象データ数:  30/40
 
 実験番号: 3
-[字種1] 認識率(%): 100 正解数/対象データ数: 20/20
-[字種2] 認識率(%): 90 正解数/対象データ数: 18/20
-[全体] 認識率(%): 95 正解数/対象データ数:  38/40
+[字種1] 認識率(%): 80 正解数/対象データ数: 16/20
+[字種2] 認識率(%): 70 正解数/対象データ数: 14/20
+[全体] 認識率(%): 75 正解数/対象データ数:  30/40
 
 実験番号: 4
-[字種1] 認識率(%): 100 正解数/対象データ数: 20/20
-[字種2] 認識率(%): 100 正解数/対象データ数: 20/20
-[全体] 認識率(%): 100 正解数/対象データ数:  40/40
+[字種1] 認識率(%): 85 正解数/対象データ数: 17/20
+[字種2] 認識率(%): 70 正解数/対象データ数: 14/20
+[全体] 認識率(%): 77.5 正解数/対象データ数:  31/40
 
 実験番号: 5
-[字種1] 認識率(%): 90 正解数/対象データ数: 18/20
-[字種2] 認識率(%): 100 正解数/対象データ数: 20/20
-[全体] 認識率(%): 95 正解数/対象データ数:  38/40
+[字種1] 認識率(%): 55.00000000000001 正解数/対象データ数: 11/20
+[字種2] 認識率(%): 65 正解数/対象データ数: 13/20
+[全体] 認識率(%): 60 正解数/対象データ数:  24/40
 
 ---[実験全体の認識率]---
-[字種1] 認識率(%):  95 正解数/対象データ数: 95/100
-[字種2] 認識率(%):  93 正解数/対象データ数: 93/100
-[合計] 認識率(%):  94 正解数/対象データ数: 188/200
+[字種1] 認識率(%):  77 正解数/対象データ数: 77/100
+[字種2] 認識率(%):  73 正解数/対象データ数: 73/100
+[合計] 認識率(%):  75 正解数/対象データ数: 150/200
 
 */
